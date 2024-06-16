@@ -3,7 +3,7 @@ import axios from "axios";
 import Web3 from "web3";
 import IPFSHashStorage from "../contracts/IPFSHashStorage.json";
 
-const AddFile = () => {
+const AddFile = ({ onFileAdded }) => {
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -48,9 +48,9 @@ const AddFile = () => {
         {
           headers: {
             "Content-Type": "multipart/form-data",
-            pinata_api_key: "8d9d1a9bc5c10d2b4a84",
+            pinata_api_key: "e7c33357ac6f2c49f523",
             pinata_secret_api_key:
-              "e8a9a7d301bd2656ffceeaebae8e690aebddb3c9dd84a1aec5be6e2497f4e83b",
+              "cd1fbcda5636a11ffa28bed055bf978282f5dcb753f276b0f28d81cc7652961d",
           },
         }
       );
@@ -58,7 +58,6 @@ const AddFile = () => {
       const ipfsHash = response.data.IpfsHash;
       setFileHash(ipfsHash);
 
-      // Connect to Ethereum blockchain
       if (window.ethereum) {
         await window.ethereum.request({ method: "eth_requestAccounts" });
         const web3 = new Web3(window.ethereum);
@@ -69,13 +68,20 @@ const AddFile = () => {
           deployedNetwork && deployedNetwork.address
         );
 
-        // Get account address from localStorage
-        const account = localStorage.getItem("account");
+        const account = (await web3.eth.getAccounts())[0];
 
-        // Call the smart contract function to add the file hash
-        await contract.methods.addFile(ipfsHash, title, description).send({
-          from: account,
-        });
+        const receipt = await contract.methods
+          .addFile(ipfsHash, title, description)
+          .send({
+            from: account,
+          });
+        console.log("File saved in blockchain:", ipfsHash);
+
+        // Fetch file details using the fileId from the event
+        const fileId = receipt.events.FileAdded.returnValues.fileId;
+
+        // Notify parent component that file has been added
+        onFileAdded();
       } else {
         console.error("Web3 provider not detected");
       }

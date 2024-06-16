@@ -1,60 +1,55 @@
 import React, { useState, useEffect } from "react";
 import Web3 from "web3";
-import axios from "axios";
 import IPFSHashStorage from "../contracts/IPFSHashStorage.json";
+import axios from "axios"; // Import Axios for HTTP requests
 
 const AllFiles = () => {
   const [files, setFiles] = useState([]);
-  const [contract, setContract] = useState(null);
-  const account = localStorage.getItem("account");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const loadWeb3 = async () => {
+    const fetchFiles = async () => {
       if (window.ethereum) {
-        window.web3 = new Web3(window.ethereum);
-        await window.ethereum.request({ method: "eth_requestAccounts" });
-      } else if (window.web3) {
-        window.web3 = new Web3(window.web3.currentProvider);
-      } else {
-        console.log(
-          "Non-Ethereum browser detected. You should consider trying MetaMask!"
-        );
-      }
-    };
+        try {
+          await window.ethereum.request({ method: "eth_requestAccounts" });
+          const web3 = new Web3(window.ethereum);
+          const networkId = await web3.eth.net.getId();
+          const deployedNetwork = IPFSHashStorage.networks[networkId];
+          const contract = new web3.eth.Contract(
+            IPFSHashStorage.abi,
+            deployedNetwork && deployedNetwork.address
+          );
 
-    const loadBlockchainData = async () => {
-      const web3 = window.web3;
+          const accounts = await web3.eth.getAccounts();
+          const ownerFilesData = await contract.methods
+            .listAllFiles()
+            .call({ from: accounts[0] });
 
-      // Set contract instance
-      const networkId = await web3.eth.net.getId();
-      const deployedNetwork = IPFSHashStorage.networks[networkId];
-      const instance = new web3.eth.Contract(
-        IPFSHashStorage.abi,
-        deployedNetwork && deployedNetwork.address
-      );
-      setContract(instance);
+          const ids = ownerFilesData[0];
+          const ipfsHashes = ownerFilesData[1];
+          const titles = ownerFilesData[2];
+          const descriptions = ownerFilesData[3];
+          const timestamps = ownerFilesData[4];
 
-      // Fetch files data from the contract
-      try {
-        const filesCount = await instance.methods.fileCount().call();
-        const newFiles = [];
-        for (let i = 1; i <= filesCount; i++) {
-          const fileInfo = await instance.methods.getFile(i).call();
-          newFiles.push({
-            ipfsHash: fileInfo.ipfsHash,
-            title: fileInfo.title, // Add title here
-            description: fileInfo.description,
-            timestamp: fileInfo.timestamp,
-          });
+          const ownerFilesList = ids.map((id, index) => ({
+            id,
+            ipfsHash: ipfsHashes[index],
+            title: titles[index],
+            description: descriptions[index],
+            timestamp: new Date(timestamps[index] * 1000).toLocaleString(),
+          }));
+
+          setFiles(ownerFilesList);
+        } catch (error) {
+          console.error("Error fetching owner's files:", error);
         }
-        setFiles(newFiles);
-      } catch (error) {
-        console.error("Error fetching files from contract:", error);
+      } else {
+        console.error("Web3 provider not detected");
       }
+      setLoading(false);
     };
 
-    loadWeb3();
-    loadBlockchainData();
+    fetchFiles();
   }, []);
 
   const downloadFile = async (ipfsHash) => {
@@ -62,19 +57,16 @@ const AllFiles = () => {
       const response = await axios.get(`https://ipfs.io/ipfs/${ipfsHash}`, {
         responseType: "arraybuffer", // Ensure response is treated as an array buffer
       });
-      // Check if response data is not empty
-      if (response && response.data) {
-        // Extract file extension from content type if available
-        const contentType = response.headers["content-type"];
-        const fileExtension = contentType ? contentType.split("/")[1] : "txt"; // Default to 'txt' if content type is not available
 
-        // Prompt user to save the file with a suggested name
+      if (response && response.data) {
+        const contentType = response.headers["content-type"];
+        const fileExtension = contentType ? contentType.split("/")[1] : "txt";
+
         const suggestedFileName = `file_${ipfsHash}.${fileExtension}`;
         const downloadConfirmed = window.confirm(
           `Do you want to download "${suggestedFileName}"?`
         );
 
-        // If user confirms, proceed with download
         if (downloadConfirmed) {
           const blob = new Blob([response.data], { type: contentType });
           const url = URL.createObjectURL(blob);
@@ -94,21 +86,37 @@ const AllFiles = () => {
     }
   };
 
+  const handleDownload = (ipfsHash) => {
+    downloadFile(ipfsHash);
+  };
+
+  if (loading) {
+    return <div>Loading files...</div>;
+  }
+
   return (
     <div>
-      <h2>Connected Account: {account}</h2>
-      {files.length > 0 && (
-        <div>
-          <h2>Files:</h2>
-          {files.map((file, index) => (
-            <div key={index}>
-              <p>File Hash: {file.ipfsHash}</p>
-              <p>File Title: {file.title}</p>
-              <p>Description: {file.description}</p>
-              <p>Timestamp: {file.timestamp}</p>
-              <button onClick={() => downloadFile(file.ipfsHash)}>
-                Download
-              </button>
+      <h2 className="md-2">My Files</h2>
+      {files.length === 0 ? (
+        <p>No files found</p>
+      ) : (
+        <div className="row">
+          {files.map((file) => (
+            <div key={file.id} className="col-md-4 mb-4">
+              <div className="card border-primary">
+                <div className="card-body">
+                  <h5 className="card-title">Title : {file.title}</h5>
+                  <p className="card-text">Description : {file.description}</p>
+                  <p className="card-text">IPFS Hash: {file.ipfsHash}</p>
+                  <p className="card-text">Uploaded at: {file.timestamp}</p>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => handleDownload(file.ipfsHash)}
+                  >
+                    Download
+                  </button>
+                </div>
+              </div>
             </div>
           ))}
         </div>
